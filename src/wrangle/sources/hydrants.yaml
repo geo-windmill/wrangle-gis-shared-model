@@ -1,0 +1,97 @@
+# Locked fire hydrant sources. Vetted live 2026-09-08, re-vetted 2026-10-30 — see docs/SOURCES.md.
+feature: hydrants
+region: California
+vetted: 2026-10-30
+
+# Hydrant sources span West Sacramento to Los Angeles, so the outline is the state.
+boundary:
+  name: California
+  url: https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/0
+  where: "STATE='06'"
+  attribution: U.S. Census Bureau, TIGERweb
+  max_allowable_offset: 0.005
+
+sources:
+  - id: H1
+    publisher: City of West Sacramento
+    attribution: City of West Sacramento
+    url: https://gis.cityofwestsacramento.org/server/rest/services/fire_hydrants/FeatureServer/0
+    status: loadable
+    expect:
+      count: 3008
+      crs: 2226
+      max_record_count: 2000
+      oid_field: OBJECTID
+    interest:
+      - "Cleanest status vocabulary of the three: Operational / Out of Service / Removed."
+      - WET_BARREL is a Yes/No flag that has to become a hydrant_type enum value.
+      - HYDRANT_MAKE has 15 manufacturer spellings including "Other".
+
+  - id: H2
+    publisher: El Dorado County
+    attribution: El Dorado County GIS
+    url: https://services.arcgis.com/UHg8l1wC48WQyDSO/arcgis/rest/services/FireHydrants/FeatureServer/0
+    status: loadable
+    expect:
+      count: 13950
+      crs: 2226
+      max_record_count: 2000
+      oid_field: OBJECTID
+    null_sentinels: ["", " "]
+    interest:
+      - Field names truncated to 10 characters by shapefile lineage — Operationa,
+        Hydrant_Ty, Manufactur, XY_Confide, GPS_Latitu.
+      - ZERO SQL nulls. The null sentinel is a single space. `Operationa IS NULL`
+        returns 0; `Operationa = ' '` returns 13,362 of 13,950. A naive population
+        metric calls this field 100% populated when it is 4%.
+      - "Hydrant_Ty mixes case: draft, DRY_BARREL, NORMAL, WET_BARREL, WHARF."
+      - Maintained holds two vocabularies at once — agency acronyms (EID, GDPUD)
+        alongside Y/N/U flags.
+      - "Owner is unexpanded acronyms: EID, GDPUD, PRIVATE, ROYLEQUE."
+
+  - id: H3
+    publisher: City of Los Angeles
+    attribution: City of Los Angeles / NavigateLA
+    url: https://services7.arcgis.com/Z89o6uh7LaCe9h2P/arcgis/rest/services/Hydrants_for_NavigateLA/FeatureServer/0
+    status: loadable
+    expect:
+      count: 60372
+      crs: 4326
+      max_record_count: 2000
+      oid_field: OBJECTID
+    interest:
+      - Already WGS84 — the one source needing no reprojection.
+      - Six fields total; SIZE_CODE is a compound outlet spec ("2 1/2 DX4S",
+        "2.5X4DX2.5AV", "4D X 2 1/2AV") carrying size, count and type in one string,
+        in both fractional and decimal spellings. Parsing, not matching.
+      - CORNER contains whitespace variants of the same value (" E" and "E").
+      - Outside the Sacramento region; included because it is the only locked source
+        that makes the size-parsing problem visible.
+
+  - id: H4
+    publisher: Carmichael Water District
+    attribution: Carmichael Water District
+    url: https://gis.carmichaelwd.org/arcgis/rest/services/Hydrants/FeatureServer/0
+    status: rejected
+    catalog: false           # H5 is the greyed hydrants card in the speed run
+    reason: token_required
+    reason_detail: >
+      Publicly listed on ArcGIS Online as a Feature Service, self-hosted, and returns
+      `error 499 Token Required` to an anonymous request. Listed is not the same as
+      available. The catalogue entry gives no hint.
+
+  - id: H5
+    publisher: Sacramento Metropolitan Fire District
+    attribution: Sacramento Metropolitan Fire District
+    url: https://services7.arcgis.com/YFJtK05B4hdhORWd/arcgis/rest/services/MetroFire_Hydrants/FeatureServer/0
+    status: rejected
+    reason: needs_value_level_parsing
+    reason_detail: >
+      25,638 features but only five fields (location_name, description, lat, lon),
+      and the two text fields swap semantics row to row. location_name holds
+      "1078", "Dead Hydrant ", "Wharf - Supplied by Fire Pump", "Hose Connection-57344";
+      description holds "STEAMER", " HYD", "55305A", and free-text location notes.
+      An Active911 export, not an asset inventory. No field-level mapping can be
+      correct here, and the honest answer is not to ingest it.
+    expect:
+      count: 25638

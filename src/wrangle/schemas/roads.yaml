@@ -1,0 +1,132 @@
+# Shared model: road centerlines.
+# Small and opinionated on purpose. Ours, not any vendor's, not Overture's.
+# Every field below is what we decided we want. Some of it nobody publishes —
+# that is information, not a bug. See `sourced: false`.
+model: roads
+version: 1
+title: Road centerlines
+geometry: linestring
+crs: EPSG:4326
+
+fields:
+  - name: name
+    hints: [fullname, full, name, street]   # the full name first: prefer it to parts
+    type: string
+    description: >
+      Full street name as a person would say it, including type and directionals.
+      "FRANKLIN BLVD", "W CAPITOL AVE".
+    nullable: true          # state highway sources have no street name at all
+    notes: Prefer a publisher's own full-name field over concatenating parts.
+
+  - name: road_class
+    hints: [class, functional, classification, fc, system, category]
+    type: enum
+    description: Functional classification, FHWA granularity.
+    values:
+      - interstate
+      - freeway_expressway
+      - principal_arterial
+      - minor_arterial
+      - major_collector
+      - minor_collector
+      - local
+      - ramp
+      - alley
+      - pedestrian
+      - bikeway
+      - trail
+      - private
+      - service
+      - other            # a real category. Do not normalize it away.
+    # What each value means, shown beside it wherever a person picks one.
+    meanings:
+      interstate: Interstate highway (FHWA class 1)
+      freeway_expressway: freeway or expressway, access-controlled (FHWA 2)
+      principal_arterial: other principal arterial (FHWA 3)
+      minor_arterial: minor arterial (FHWA 4)
+      major_collector: major collector (FHWA 5)
+      minor_collector: minor collector (FHWA 6)
+      local: local road or street (FHWA 7)
+      ramp: interchange ramp or connector
+      alley: alley
+      pedestrian: walkway or pedestrian path
+      bikeway: bike path
+      trail: trail
+      private: private road
+      service: service or frontage road
+      other: a real category that fits none of these
+    nullable: true
+    notes: >
+      Sources vary in granularity. A publisher whose vocabulary is "ART"/"COL"
+      cannot reach principal_arterial vs minor_arterial on its own; that mapping
+      is a human judgment and the mapping table marks it as one.
+
+  - name: one_way
+    hints: [oneway, one, way, direction, flow, travel]
+    type: enum
+    description: Travel restriction relative to the digitized geometry direction.
+    values:
+      - "no"        # two-way
+      - forward     # one-way along digitization order (from-node to to-node)
+      - reverse     # one-way against digitization order
+    meanings:
+      "no": two-way, no restriction
+      forward: one-way, the direction the line was drawn
+      reverse: one-way, against the direction the line was drawn
+    nullable: true
+    notes: >
+      Deliberately NOT a boolean, which the first draft of this model used. Real sources
+      encode B/FT/TF and 0/1/2 — three states. A boolean would silently collapse
+      forward and reverse into "true" and destroy direction: the target type changes
+      the meaning.
+
+  - name: speed_limit
+    hints: [speed, limit, mph, posted]
+    type: integer
+    unit: mph
+    description: Posted speed limit.
+    nullable: true
+    notes: >
+      Zero is not a speed limit. Sources use 0 for unknown; it must become null,
+      not 0.
+    min: 5
+    max: 85
+
+  - name: owner
+    hints: [owner, ownership, maintained, maint, jurisdiction, agency, responsibility]
+    type: string
+    description: Agency that owns or maintains the segment.
+    nullable: true
+
+  - name: lanes
+    hints: [lane, lanes]
+    type: integer
+    description: Through lane count, both directions.
+    nullable: true
+    sourced: false
+    notes: >
+      No locked source publishes lane count. Kept in the model because it is
+      what we want; the column ships empty and tells us what to go ask for.
+
+  - name: surface
+    hints: [surface, pavement, paving]
+    type: enum
+    description: Pavement surface.
+    values: [asphalt, concrete, chipseal, gravel, dirt, other]
+    nullable: true
+    sourced: false
+    notes: No locked source publishes surface.
+
+  - name: source_date
+    hints: [edit, edited, update, updated, modified, changed, date]
+    type: date
+    description: Publisher's own last-edit or currency date for the feature.
+    nullable: true
+
+provenance:
+  - name: source_id
+    type: string
+    description: Stable id of the source layer in sources/roads.yaml (e.g. "R1").
+  - name: source_oid
+    type: integer
+    description: The publisher's own OBJECTID for this feature. Round-trip key.

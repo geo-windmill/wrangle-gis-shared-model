@@ -1,0 +1,52 @@
+[project]
+name = "wrangle"
+version = "0.1.0"
+description = "Wrangling public geospatial data into a shared model — FOSS4G NA 2026 demo"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+# Kept separate so the ArcGIS client and cache layer install and test without
+# a GDAL toolchain. `wrangle fetch` and `wrangle serve` need geo + api.
+geo = [
+    "geopandas>=1.0",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "pyogrio>=0.9",
+    "pyarrow>=16.0",
+    "duckdb>=1.0",
+]
+# Field matching: structured outputs and server-side refusal fallbacks.
+ai = ["anthropic>=1.11"]
+api = ["fastapi>=0.111", "uvicorn[standard]>=0.30"]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "respx>=0.21", "ruff>=0.5"]
+
+[project.scripts]
+wrangle = "wrangle.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wrangle"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

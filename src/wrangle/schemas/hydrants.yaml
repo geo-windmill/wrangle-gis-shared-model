@@ -1,0 +1,100 @@
+# Shared model: fire hydrants.
+# Same discipline as roads. Note how much of what we want is unpublished —
+# for hydrants that is most of the interesting engineering data.
+model: hydrants
+version: 1
+title: Fire hydrants
+geometry: point
+crs: EPSG:4326
+
+fields:
+  - name: status
+    hints: [status, operational, condition, active, state]
+    type: enum
+    description: Service status of the hydrant.
+    values:
+      - operational
+      - out_of_service
+      - removed
+      - proposed
+      - unknown
+    nullable: true
+    notes: >
+      Only one locked source publishes a real status vocabulary; a second has
+      OPERATIONAL on 4% of rows and nothing else. Must stay nullable.
+
+  - name: hydrant_type
+    hints: [type, barrel, wet, dry, kind, style]
+    type: enum
+    description: Barrel/appliance type.
+    values:
+      - wet_barrel
+      - dry_barrel
+      - wharf
+      - drafting
+      - standpipe
+      - other
+    nullable: true
+    notes: >
+      Reachable two ways: a Yes/No wet-barrel flag, or a type field whose values
+      arrive as `draft`, `DRY_BARREL`, `NORMAL`, `WET_BARREL`, `WHARF`. `NORMAL`
+      is not a barrel type and must not be guessed into one.
+
+  - name: size_in
+    hints: [size, diameter, outlet, nozzle]
+    type: number
+    unit: inch
+    description: Nominal diameter of the largest outlet.
+    nullable: true
+    min: 2
+    max: 12
+    notes: >
+      One source publishes a clean number. Another publishes a compound outlet
+      spec ("2 1/2 DX4S", "2.5X4DX2.5AV", "4D X 2 1/2AV") that encodes size,
+      count and type together, in both fractional and decimal spellings. That is
+      parsing, not field matching, and it needs a digit-run guard so "4S" cannot
+      fuzzy-match "2 1/2 X 4D".
+
+  - name: owner
+    hints: [owner, ownership, maintained, maint, agency, jurisdiction]
+    type: string
+    description: Agency or entity that owns the hydrant.
+    nullable: true
+    notes: >
+      Arrives as unexpanded acronyms (EID, GDPUD) mixed with PRIVATE. Expansion
+      is a lookup a human curates, not something to infer per-run.
+
+  - name: source_date
+    hints: [edit, edited, update, updated, modified, changed, date]
+    type: date
+    description: Publisher's own last-edit or currency date for the feature.
+    nullable: true
+
+  - name: flow_class
+    hints: [flow, gpm, color, colour, nfpa]
+    type: enum
+    description: NFPA 291 flow class (the hydrant bonnet colour classes).
+    values: [AA, A, B, C]
+    nullable: true
+    sourced: false
+    notes: >
+      NOT PUBLISHED BY ANY LOCKED SOURCE. No flow, GPM, PSI, or colour field
+      exists in the three loadable hydrant layers. Kept declared because it is
+      the field every fire-protection engineer asks for first, and its emptiness
+      is the point. The unified hydrant map is coloured by hydrant_type instead.
+
+  - name: install_year
+    hints: [install, installed, year, built]
+    type: integer
+    description: Year installed.
+    nullable: true
+    sourced: false
+    notes: No locked source publishes an install date.
+
+provenance:
+  - name: source_id
+    type: string
+    description: Stable id of the source layer in sources/hydrants.yaml (e.g. "H1").
+  - name: source_oid
+    type: integer
+    description: The publisher's own OBJECTID for this feature. Round-trip key.

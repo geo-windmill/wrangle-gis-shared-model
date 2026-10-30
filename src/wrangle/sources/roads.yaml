@@ -1,0 +1,127 @@
+# Locked road centerline sources. Vetted live 2026-09-08, re-vetted 2026-10-30 — see docs/SOURCES.md.
+# `expect` values are assertions the vetting CLI re-checks; drift means re-vet.
+feature: roads
+region: Sacramento region, California
+vetted: 2026-10-30
+
+# The area of interest under every map: Sacramento and Yolo counties, merged.
+# Yolo is a separate county, so a Sacramento-only outline would make R2 look
+# irrelevant. Public domain, from the Census Bureau's own ArcGIS service.
+boundary:
+  name: Sacramento + Yolo counties
+  url: https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1
+  where: "STATE='06' AND COUNTY IN ('067','113')"
+  attribution: U.S. Census Bureau, TIGERweb
+
+sources:
+  - id: R1
+    publisher: Sacramento County
+    attribution: Sacramento County GIS (SCGISAdmin)
+    color: "#F37321"   # orange, as on the slides
+    url: https://services1.arcgis.com/5NARefyPVtAeuJPU/arcgis/rest/services/Centerlines/FeatureServer/0
+    status: loadable
+    expect:
+      count: 72596
+      crs: 2226
+      max_record_count: 2000
+      oid_field: OBJECTID
+    interest:
+      - Regional authority; carries City of Sacramento streets via CITYLEFT/CITYRIGHT.
+      - Five-part name split alongside a 100%-populated FULLSTREET.
+      - CLASS and CARTOCLASS are independent axes (no domain on either; they disagree on 6,142 roads). Choosing one takes a person.
+
+  - id: R2
+    publisher: Yolo County
+    attribution: Yolo County GIS
+    color: "#3DD6F5"   # cyan, as on the slides (white is the merged result)
+    url: https://services2.arcgis.com/RETsakmE0SJfZXCd/arcgis/rest/services/Yolo_County_Open_Data_Street_Centerlines/FeatureServer/2
+    status: loadable
+    expect:
+      count: 11493
+      crs: 2226
+      max_record_count: 2000
+      oid_field: OBJECTID
+      coded_domain_fields: 26
+    interest:
+      - Layer id is 2, not 0. Enumerate the service; never assume /0.
+      - 26 coded domains — codes decode through the layer's own domain labels.
+      - YCFC carries FHWA-style codes with labels.
+      - OneWay contains a rogue "2" that is absent from its own declared domain.
+      - RoadClass is a perfect name match populated on 1% of rows; Ownership on 0.3%.
+      - Two competing name splits in one layer (legacy + NG911).
+
+  - id: R3
+    publisher: City of West Sacramento
+    attribution: City of West Sacramento
+    url: https://gis.cityofwestsacramento.org/server/rest/services/centerline/FeatureServer/0
+    status: loadable
+    expect:
+      count: 2791
+      crs: 2226
+      max_record_count: 2000
+      oid_field: OBJECTID
+    interest:
+      - Self-hosted ArcGIS Server on a host the AGOL catalogue gets wrong (see R7).
+      - ONEWAY is an Integer with values 0/1/2 — the third one-way encoding.
+      - YCFC uses the same codes as R2 with a different domain label format.
+      - STATUS is EXISTING/PROPOSED; loading proposed roads is a decision to surface.
+      - TRAVELDIRE and SOURCE exist and are blank in all 2,791 rows.
+
+  - id: R4
+    publisher: City of Elk Grove
+    attribution: City of Elk Grove
+    url: https://webmaps.elkgrove.gov/arcgis/rest/services/OPEN_DATA_PORTAL/Streets/MapServer/0
+    status: loadable
+    expect:
+      count: 13602
+      crs: 2226
+      max_record_count: 2000
+      oid_field: null      # MapServer reports no objectIdField; detect by field type
+    interest:
+      - Self-hosted MapServer, not FeatureServer.
+      - Layer JSON omits objectIdField entirely — fall back to esriFieldTypeOID.
+      - Shares schema lineage with R1 (both SACOG-derived); weakest independent card.
+
+  - id: R5
+    publisher: Caltrans
+    attribution: California Department of Transportation
+    url: https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
+    status: loadable
+    where: "County_label='Sacramento'"
+    expect:
+      count: 779834            # statewide
+      count_filtered: 24952    # with `where`
+      crs: 3857
+      max_record_count: 2000
+      oid_field: OBJECTID
+    interest:
+      - No name field at all — the honest "this target has no source here" case.
+      - F_System is a bare integer 1-7 with no published domain. Meaning lives in
+        FHWA documentation, not in the service.
+      - Web Mercator, unlike every other roads source.
+      - 780k features statewide; unusable without the `where` filter.
+
+  - id: R6
+    publisher: Caltrans
+    attribution: California Department of Transportation
+    url: https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/All_Roads/FeatureServer/0
+    status: rejected
+    catalog: false           # R7 is the greyed roads card on stage
+    reason: no_mappable_attributes
+    reason_detail: >
+      723,692 features, 10 fields, and the only non-system attribute is RouteId.
+      The service works perfectly; there is simply nothing to map into the model.
+    expect:
+      count: 723692
+      crs: 3310
+
+  - id: R7
+    publisher: City of West Sacramento (as catalogued)
+    attribution: City of West Sacramento
+    url: https://gis-server.cityofwestsacramento.org/arcgis/rest/services/Layers/centerline/FeatureServer/0
+    status: rejected
+    reason: catalogued_url_dead
+    reason_detail: >
+      The ArcGIS Online item for this layer points at gis-server.cityofwestsacramento.org,
+      which does not resolve in DNS. The working host is gis.cityofwestsacramento.org — see R3.
+      Kept as a card because "the catalogue lied" is the most common discovery failure.

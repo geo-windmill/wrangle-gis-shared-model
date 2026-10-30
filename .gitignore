@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — this repo ships .env.example only. Never a real .env.
+.env
+.env.*
+!.env.example
+
+# Agency data is never committed: several publishers forbid redistribution (DATA.md).
+# `wrangle fetch` downloads it, and the record-and-replay cache makes later runs offline.
+cache/
+data/raw/
+out/
+*.parquet
+# The area-of-interest outlines ARE committed: small, public domain (US Census).
+!data/boundaries/
+
+# UI
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# The configuration records are a local SQLite file: your decisions, never committed. Everyone
+# who clones the repo builds their own by running the review.
+wrangle.db
+*.db-journal
+*.db-wal
+*.db-shm
