@@ -442,5 +442,50 @@ def cache_warm(
     asyncio.run(run())
 
 
+@cache_app.command("basemap")
+def cache_basemap(
+    feature: Annotated[str | None, typer.Argument(help="roads or hydrants")] = None,
+    max_zoom: Annotated[int, typer.Option(help="Deepest zoom to keep (tiles stop at 14)")] = 14,
+    max_tiles: Annotated[int, typer.Option(help="Stop a zoom level that needs more tiles")] = 4000,
+) -> None:
+    """Keep the basemap for each area of interest on disk, so the map draws offline.
+
+    Run this on good wifi, after `wrangle fetch`. A county keeps every zoom to street
+    level; a whole state stops where one zoom would need more than --max-tiles.
+    """
+    import json
+
+    from shapely.geometry import shape
+
+    from . import basemap
+    from .download import boundary_path
+
+    feats = [feature] if feature else available_features()
+    bboxes = []
+    for feat in feats:
+        p = boundary_path(feat)
+        if not p.exists():
+            console.print(f"[yellow]{feat}: no area of interest yet — run `wrangle fetch`[/]")
+            continue
+        fc = json.loads(p.read_text(encoding="utf-8"))
+        bboxes.append(shape(fc["features"][0]["geometry"]).bounds)
+        console.print(f"  {feat}: {p.name}")
+
+    def progress(done: int, total: int) -> None:
+        if done % 250 == 0 or done == total:
+            console.print(f"  {done:,} / {total:,} files")
+
+    try:
+        counts = asyncio.run(basemap.prefetch(bboxes, max_zoom, max_tiles, progress))
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from None
+    missing = f", {counts['missing']:,} not available" if counts["missing"] else ""
+    console.print(
+        f"basemap: {counts['files']:,} files{missing}; "
+        f"{counts['bytes'] / 1e6:.0f} MB in {basemap.root()}"
+    )
+
+
 if __name__ == "__main__":
     app()

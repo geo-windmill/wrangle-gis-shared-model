@@ -39,3 +39,5 @@ a US government work, in the public domain. Census asks for acknowledgement:
 The app's basemap is [OpenFreeMap](https://openfreemap.org), drawing
 © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors and
 © OpenMapTiles. Every source's credit line is shown on the map while it is visible.
+`wrangle cache basemap` keeps a copy of its tiles on your machine under `cache/basemap/`,
+for drawing the map offline; like the agency data, that copy is never committed.

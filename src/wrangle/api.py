@@ -52,6 +52,7 @@ from pydantic import BaseModel
 from pyproj import Transformer
 from shapely.geometry import box, shape
 
+from . import basemap
 from .arcgis import ArcGISClient, assess_layer
 from .cache import ResponseCache
 from .checks import as_code, domain_spelling, run_checks
@@ -1139,6 +1140,31 @@ async def source_fetch(feature: str, source_id: str) -> dict[str, Any]:
 
     asyncio.get_running_loop().create_task(run())
     return _jobs[key]
+
+
+# --- the basemap --------------------------------------------------------------
+
+_basemap_client: Any = None
+
+
+@app.get("/api/basemap/{path:path}")
+async def basemap_file(path: str) -> Response:
+    """One OpenFreeMap file (style, tile index, tile, font, sprite), kept on disk the
+    first time so the map draws the same offline. 404 when it can't be had."""
+    global _basemap_client
+    if _basemap_client is None:
+        _basemap_client = basemap.client()
+    try:
+        body = await basemap.get(path, _basemap_client)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+    if body is None:
+        raise HTTPException(404, f"basemap file not available offline: {path}")
+    return Response(
+        body,
+        media_type=basemap.media_type(basemap.local_path(path)),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # --- the UI -------------------------------------------------------------------

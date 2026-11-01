@@ -214,6 +214,21 @@ wrangle cache status
 The cache is content-addressed by method + URL + normalised params, and stores a
 readable `.meta.json` beside every body so you can see what was recorded and when.
 
+### The basemap, offline
+
+The map's basemap goes through `wrangle serve` too, and every file of it (style, vector
+tiles, fonts, icons) is kept under `cache/basemap/` the first time the map shows it. To
+keep it ahead of time for the whole area of interest, run this on good wifi:
+
+```bash
+wrangle cache basemap
+```
+
+It keeps every zoom down to street level for the roads area (Sacramento and Yolo
+counties) and stops at a state-wide view for the hydrants (California): about 6,000
+files, 110 MB. In `replay` mode a part of the map that was never kept stays blank rather
+than waiting on the network.
+
 ## Settings
 
 Set in the shell or in `.env` (copy `.env.example`); the shell wins. All optional.
@@ -265,6 +280,7 @@ src/wrangle/
   cleaning.py              the "as published" and "cleaned" value modes
   mappings.py              the configuration records (SQLite) and their history
   convert.py               Convert: each source into the model, one unified layer, the queries
+  basemap.py               the basemap through the server, kept on disk for offline maps
   api.py                   the HTTP API behind the UI
   arcgis/types.py          layer JSON, coded domains, field profiles, verdicts
   arcgis/client.py         async client + the pagination ladder
@@ -282,7 +298,7 @@ data/
   raw/                     what `wrangle fetch` downloads (not committed)
 tests/                     including synthetic failures no live source reproduces
 docs/SOURCES.md            the vetting record: what each source proves
-cache/                     every recorded response, incl. cache/ai/ (not committed)
+cache/                     every recorded response, incl. cache/ai/ and cache/basemap/ (not committed)
 out/                       converted GeoParquet and reports (not committed)
 wrangle.db                 your decisions: a local SQLite file (not committed)
 ```

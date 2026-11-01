@@ -12,9 +12,14 @@ import { BOUNDARY_COLOR, HIGHLIGHT_COLOR, PICK_COLOR, SOURCE_DASH, useColorOf, t
 
 maplibregl.setWorkerUrl(workerUrl);
 
-// Free, keyless vector basemap (OpenStreetMap data). If the wifi is gone the map
-// falls back to a plain background: every agency layer still draws from local data.
+// Free, keyless vector basemap (OpenStreetMap data). Every request for it goes through
+// `wrangle serve`, which keeps a copy on disk (`wrangle cache basemap` fills it ahead of
+// time), so it draws with the wifi off. With no copy and no wifi the map falls back to a
+// plain background: every agency layer still draws from local data.
 const BASEMAP_URL = "https://tiles.openfreemap.org/styles/dark";
+const BASEMAP_HOST = "https://tiles.openfreemap.org/";
+const viaServer = (url: string) =>
+  url.startsWith(BASEMAP_HOST) ? `${window.location.origin}/api/basemap/${url.slice(BASEMAP_HOST.length)}` : url;
 const BLANK_STYLE: StyleSpecification = {
   version: 8,
   sources: {},
@@ -70,6 +75,7 @@ export function useSourceMap({ feature, sources, order, hidden, showBoundary = t
         center: [-121.5, 38.5],
         zoom: 8,
         attributionControl: { compact: false },
+        transformRequest: (url) => ({ url: viaServer(url) }),
       });
       m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       m.addControl(new maplibregl.ScaleControl({ unit: "imperial" }), "bottom-right");
@@ -332,7 +338,7 @@ async function loadBasemap(): Promise<StyleSpecification> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 3000);
-    const r = await fetch(BASEMAP_URL, { signal: ctl.signal });
+    const r = await fetch(viaServer(BASEMAP_URL), { signal: ctl.signal });
     clearTimeout(t);
     if (r.ok) return (await r.json()) as StyleSpecification;
   } catch {
