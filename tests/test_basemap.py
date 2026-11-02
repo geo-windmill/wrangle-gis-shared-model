@@ -19,7 +19,12 @@ def tmp_root(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "path", ["../wrangle.db", "fonts/../../x", "styles//dark", "elsewhere/x.png", r"fonts\..\x", ""]
+    "path",
+    [
+        "../wrangle.db", "fonts/../../x", "styles//dark", "elsewhere/x.png", r"fonts\..\x", "",
+        "fonts/C:/Windows/x.pbf", "fonts/x.pbf:stream", "fonts/CON/0-255.pbf", "fonts/nul.pbf",
+        "fonts/.../x", "planetX/1/2/3.pbf",
+    ],
 )
 def test_a_request_path_never_leaves_the_folder(path):
     with pytest.raises(ValueError):

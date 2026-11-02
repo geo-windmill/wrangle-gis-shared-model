@@ -16,6 +16,7 @@ import asyncio
 import json
 import math
 import os
+import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -27,8 +28,12 @@ from .cache import DEFAULT_CACHE_DIR, Mode
 UPSTREAM = "https://tiles.openfreemap.org/"
 STYLE = "styles/dark"
 # Everything the style points at lives under one of these.
-ALLOWED = ("styles/", "planet", "natural_earth/", "fonts/", "sprites/")
+ALLOWED = {"styles", "planet", "natural_earth", "fonts", "sprites"}
 TYPES = {".pbf": "application/x-protobuf", ".png": "image/png", ".json": "application/json"}
+# What a style's file names are made of (font stacks have spaces and commas, sprites @2x).
+# Nothing else: no colons, slashes or drive letters reach the file system.
+SEGMENT = re.compile(r"[A-Za-z0-9 _.,@-]+")
+RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"{d}{i}" for d in ("COM", "LPT") for i in range(10))}
 # Unicode blocks the labels here need: Latin, Latin-1 and Latin Extended, punctuation.
 GLYPH_RANGES = ("0-255", "256-511", "8192-8447")
 
@@ -44,7 +49,11 @@ def mode() -> Mode:
 def local_path(path: str) -> Path:
     """Where one upstream file is kept. A path from a request never leaves the folder."""
     parts = path.split("/")
-    if not path.startswith(ALLOWED) or "\\" in path or any(p in ("", ".", "..") for p in parts):
+    if (
+        parts[0] not in ALLOWED
+        or not all(SEGMENT.fullmatch(p) for p in parts)
+        or any(p.strip(".") == "" or p.split(".")[0].upper() in RESERVED for p in parts)
+    ):
         raise ValueError(f"not a basemap file: {path!r}")
     # The style and the tile index have no extension; the index ("planet") shares its
     # name with the tile folder, so both are kept as .json.
