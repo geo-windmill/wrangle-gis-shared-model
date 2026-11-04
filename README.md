@@ -62,7 +62,7 @@ reports how many rows it filled and why each empty one is empty — blank at the
 no field fits, a value nobody decided yet, a date that can't be read. A source with
 undecided values still converts, and says so. Then DuckDB answers "road miles by class,
 by publisher" straight off the unified file, and the map shows the unified layer:
-click a road to see each source's converted row there. Below the map, the **Query** tab is a SQL editor with a few
+click a road to see each source's converted row there. Picking on the map narrows the **Data** tab to those rows: a click picks the road under the pointer, Ctrl-click adds to the pick, and Shift-drag picks every road in a box. Below the map, the **Query** tab is a SQL editor with a few
 preloaded queries (fill rates, what each publisher wrote and where it landed, speed
 limits, one bridge in every source); edit them or write your own (Ctrl+Enter runs).
 DuckDB there can read and write only under `out/`, and an answer stops at 1,000 rows.

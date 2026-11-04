@@ -392,8 +392,14 @@ export const api = {
     get<{ hits: { id: string; publisher: string; row: Record<string, string | number | boolean | null>; geometry: Geometry }[] }>(
       `/api/${f}/converted/at?lon=${lon}&lat=${lat}&tolerance_m=${tol}&ids=${ids.join(",")}`,
     ),
-  convertedRows: (f: string, source: string | null, offset = 0, limit = 100) =>
-    get<RowsPage>(`/api/${f}/converted/rows?offset=${offset}&limit=${limit}${source ? `&source=${source}` : ""}`),
+  /** Every converted feature touching a lon/lat box: `source:oid` keys and their lines. */
+  convertedIn: (f: string, bbox: [number, number, number, number], ids: string[]) =>
+    get<{ keys: string[]; geometries: Geometry[]; total: number }>(`/api/${f}/converted/in?bbox=${bbox.join(",")}&ids=${ids.join(",")}`),
+  /** A page of converted rows; `keys` (`source:oid`) keeps only the features picked on the map. */
+  convertedRows: (f: string, source: string | null, offset = 0, limit = 100, keys?: string[]) =>
+    get<RowsPage>(
+      `/api/${f}/converted/rows?offset=${offset}&limit=${limit}${source ? `&source=${source}` : ""}${keys ? `&keys=${encodeURIComponent(keys.join(","))}` : ""}`,
+    ),
   convertedUrl: (f: string, id: string, version: string) => `/api/${f}/converted/${id}/geojson?v=${encodeURIComponent(version)}`,
   fetchSource: (f: string, id: string) => send(`/api/${f}/sources/${id}/fetch`, "POST"),
 };

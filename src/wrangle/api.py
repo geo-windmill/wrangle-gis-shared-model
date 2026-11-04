@@ -27,7 +27,9 @@ the registry, the assessment, or the GeoParquet files `wrangle fetch` wrote.
     POST /api/{feature}/query                       DuckDB over the converted files (any SQL)
     GET  /api/{feature}/converted/{id}/geojson      a converted source, for the map
     GET  /api/{feature}/converted/rows              a page of the unified layer, as data
+    GET  /api/{feature}/converted/in?bbox=&ids=     every converted feature in a box (map select)
     POST /api/{feature}/sources/{id}/fetch          (re)download one source
+    GET  /api/basemap/{path}                        the basemap, kept on disk for offline maps
 
 Run with `wrangle serve`. The built UI is served from web/dist at `/`.
 """
@@ -972,16 +974,59 @@ def query(feature: str, body: Query | None = None) -> dict[str, Any]:
 
 @app.get("/api/{feature}/converted/rows")
 def converted_rows(
-    feature: str, source: str | None = None, offset: int = 0, limit: int = 100
+    feature: str,
+    source: str | None = None,
+    offset: int = 0,
+    limit: int = 100,
+    keys: str | None = None,
 ) -> dict[str, Any]:
-    """A page of the unified layer, as it landed in the model (no geometry)."""
-    _sources(feature)
+    """A page of the unified layer, as it landed in the model (no geometry). `keys`
+    (`R1:61036,R2:6803`) keeps only the features picked on the map. Each row's source
+    reads as its publisher, `Sacramento County (R1)`; the file itself stores `R1`."""
+    ss = _sources(feature)
     if source:
         _source(feature, source)
+    picked = None
+    if keys is not None:
+        picked = []
+        for k in [k for k in keys.split(",") if k][:MAX_PICKED]:
+            sid, _, oid = k.partition(":")
+            if not oid.lstrip("-").isdigit():
+                raise HTTPException(422, f"not a source:oid key: {k!r}")
+            picked.append((sid, int(oid)))
     try:
-        return read_rows(feature, source, max(0, offset), min(max(1, limit), 500))
+        page = read_rows(feature, source, max(0, offset), min(max(1, limit), 500), picked)
     except FileNotFoundError as exc:
         raise HTTPException(409, str(exc)) from None
+    names = {s.id: f"{s.publisher} ({s.id})" for s in ss.loadable}
+    page["rows"] = [[names.get(r[0], r[0]), *r[1:]] for r in page["rows"]]
+    return page
+
+
+MAX_PICKED = 500  # a box drawn over a whole county is not a selection worth a table
+
+
+@app.get("/api/{feature}/converted/in")
+def converted_in(feature: str, bbox: str, ids: str) -> dict[str, Any]:
+    """Every converted feature that touches a lon/lat box (`west,south,east,north`), per
+    source, with its line so the map can outline it. Up to MAX_PICKED features."""
+    ss = _sources(feature)
+    try:
+        w, s, e, n = (float(v) for v in bbox.split(","))
+    except ValueError:
+        raise HTTPException(422, "bbox is west,south,east,north") from None
+    area = box(w, s, e, n)
+    keys, geoms = [], []
+    for sid in [i for i in ids.split(",") if i]:
+        p = out_path(feature, sid)
+        if sid not in {x.id for x in ss.loadable} or not p.exists():
+            continue
+        gdf = _converted_frame(feature, sid, p.stat().st_mtime)
+        query = gpd.GeoSeries([area], crs=4326).to_crs(gdf.crs).iloc[0]
+        hit = gdf.iloc[sorted(int(i) for i in gdf.sindex.query(query, predicate="intersects"))]
+        keys += [f"{sid}:{int(o)}" for o in hit["source_oid"]]
+        geoms += [shapely.geometry.mapping(g) for g in hit.geometry.to_crs(4326)]
+    return {"keys": keys[:MAX_PICKED], "geometries": geoms[:MAX_PICKED], "total": len(keys)}
 
 
 NO_VALUE = "<null>"  # groups the rows a model field left null

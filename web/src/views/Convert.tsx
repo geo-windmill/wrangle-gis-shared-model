@@ -11,15 +11,18 @@
 // per source and a unified one, then runs the query over the unified file: preloaded
 // queries, editable, and a Data tab with the converted rows themselves. Every null
 // a conversion leaves says why; undecided values are named, never silently dropped.
+import type { Geometry } from "geojson";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ConvertReport, type ConvertStatus, type Feature, type FieldReport, type ModelField, type QueryResult, type RowsPage, type SavedQuery, type SourceState } from "../api";
-import { CONVERTED, useColorOf, type MapClass } from "../colors";
+import { CONVERTED, PICK_COLOR, useColorOf, type MapClass } from "../colors";
 import { Eye, Splitter } from "../components/bits";
 import { pct } from "../components/ValueBars";
 import { useSourceMap } from "../map/useSourceMap";
 
 type Props = { feature: Feature; queue: string[]; onBack: () => void };
 type Job = "waiting" | "converting" | "done" | "error";
+// Features picked on the map (`source:oid`), shown in the Data tab and outlined on the map.
+type Picked = { keys: string[]; geometries: Geometry[] };
 
 // Why a row is null, in a word or two. Open reasons mean the review isn't finished.
 const REASON: Record<string, string> = {
@@ -98,18 +101,45 @@ export default function Convert({ feature, queue, onBack }: Props) {
   const versions = Object.fromEntries((status?.sources ?? []).map((s) => [s.id, s.report?.converted_at ?? ""]));
   const dataUrl = useCallback((id: string) => api.convertedUrl(f, id, versions[id] ?? ""), [f, JSON.stringify(versions)]);
   const order = useMemo(() => converted, [converted.join(",")]);
-  // A click shows the converted row(s) under the pointer, one per source, as they landed.
+  // A click shows the converted row(s) under the pointer, one per source, as they landed,
+  // and picks them for the Data tab. Ctrl-click adds to what is picked; shift-drag picks
+  // every feature in a box.
   const mapApi = useRef<ReturnType<typeof useSourceMap> | null>(null);
   const shown = converted.filter((id) => !hidden.has(id));
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const pickedRef = useRef<Picked | null>(null);
+  const choose = useCallback((p: Picked | null) => {
+    pickedRef.current = p;
+    setPicked(p);
+    mapApi.current?.outline(p?.geometries ?? []);
+  }, []);
   const pick = useCallback(
-    async (lng: number, lat: number, tol: number) => {
+    async (lng: number, lat: number, tol: number, add: boolean) => {
       const m = mapApi.current;
       if (!m) return;
       const { hits } = await api.convertedAt(f, lng, lat, tol, shown).catch(() => ({ hits: [] }));
-      m.outline(hits.map((h) => h.geometry));
-      m.popup(lng, lat, hits.length ? popupContent(hits, fields, colorOf) : null);
+      const now: Picked = { keys: hits.map((h) => `${h.id}:${h.row.source_oid}`), geometries: hits.map((h) => h.geometry) };
+      const before = add ? pickedRef.current : null;
+      if (before) {
+        const fresh = now.keys.map((k, i) => [k, i] as const).filter(([k]) => !before.keys.includes(k));
+        choose({ keys: [...before.keys, ...fresh.map(([k]) => k)], geometries: [...before.geometries, ...fresh.map(([, i]) => now.geometries[i])] });
+        m.popup(lng, lat, null);
+        return;
+      }
+      choose(hits.length ? now : null);
+      m.popup(lng, lat, hits.length ? popupContent(hits, fields, colorOf) : null, true);
     },
-    [f, shown.join(","), fields, colorOf],
+    [f, shown.join(","), fields, colorOf, choose],
+  );
+  const boxSelect = useCallback(
+    async (box: [number, number, number, number]) => {
+      const m = mapApi.current;
+      if (!m) return;
+      m.popup(0, 0, null);
+      const r = await api.convertedIn(f, box, shown).catch(() => null);
+      choose(r && r.keys.length ? { keys: r.keys, geometries: r.geometries } : null);
+    },
+    [f, shown.join(","), choose],
   );
   const mapHook = useSourceMap({
     feature: f,
@@ -118,6 +148,7 @@ export default function Convert({ feature, queue, onBack }: Props) {
     hidden,
     basemap: true,
     onClickPoint: pick,
+    onBoxSelect: boxSelect,
     dataUrl,
     classes,
   });
@@ -196,6 +227,11 @@ export default function Convert({ feature, queue, onBack }: Props) {
             {/* h-full, not absolute: MapLibre's own CSS makes its container position: relative */}
             <div ref={container} className="h-full w-full" />
             {classes && converted.length > 0 && <Legend field={`${f}.parquet`} classes={classes} point={feature.geometry === "point"} />}
+            {converted.length > 0 && (
+              <div className="pointer-events-none absolute top-2 left-2 rounded bg-panel/80 px-2 py-1 text-xs text-ink-3">
+                Click to inspect · Ctrl-click to add · Shift-drag to select
+              </div>
+            )}
           </div>
           {/* Always there, so the map is sized once and the area of interest fits. */}
           <BottomPanel
@@ -206,6 +242,8 @@ export default function Convert({ feature, queue, onBack }: Props) {
             field={status?.map_field ?? null}
             order={queue.map((id) => status?.sources.find((x) => x.id === id)?.publisher ?? id)}
             sources={converted.map((id) => ({ id, publisher: status?.sources.find((x) => x.id === id)?.publisher ?? id, color: colorOf(id) }))}
+            picked={picked?.keys ?? null}
+            onClearPicked={() => choose(null)}
           />
         </section>
       </div>
@@ -323,9 +361,15 @@ function BottomPanel(props: {
   field: string | null;
   order: string[];
   sources: { id: string; publisher: string; color: string }[];
+  picked: string[] | null;
+  onClearPicked: () => void;
 }) {
   const [tab, setTab] = useState<"query" | "data">("query");
   const [height, setHeight] = useState(288);
+  // Picking on the map is a request to see those rows.
+  useEffect(() => {
+    if (props.picked) setTab("data");
+  }, [props.picked]);
   return (
     <>
       <Splitter axis="y" onDrag={(d) => setHeight((h) => Math.min(Math.max(h - d, 140), window.innerHeight - 200))} />
@@ -343,7 +387,7 @@ function BottomPanel(props: {
             <QueryPanel f={props.f} queries={props.queries} built={props.built} fields={props.fields} field={props.field} order={props.order} />
           </div>
           <div className={tab === "data" ? "flex min-w-0 flex-1" : "hidden"}>
-            <DataPanel f={props.f} built={props.built} sources={props.sources} />
+            <DataPanel f={props.f} built={props.built} sources={props.sources} picked={props.picked} onClearPicked={props.onClearPicked} />
           </div>
         </div>
       </div>
@@ -523,18 +567,39 @@ function Table({ columns, rows, footer }: { columns: string[]; rows: (string | n
 const PAGE = 100;
 
 /** The converted rows themselves, a page at a time: what landed in each model field,
- *  with where it came from. Geometry is on the map, so it's left out here. */
-function DataPanel({ f, built, sources }: { f: string; built: number | null; sources: { id: string; publisher: string; color: string }[] }) {
+ *  with where it came from. Geometry is on the map, so it's left out here. Features
+ *  picked on the map narrow it to just those rows, until the selection is cleared. */
+function DataPanel({
+  f,
+  built,
+  sources,
+  picked,
+  onClearPicked,
+}: {
+  f: string;
+  built: number | null;
+  sources: { id: string; publisher: string; color: string }[];
+  picked: string[] | null;
+  onClearPicked: () => void;
+}) {
   const [source, setSource] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<RowsPage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const pickedKey = picked?.join(",") ?? null;
+  useEffect(() => {
+    if (picked) {
+      setSource(null);
+      setOffset(0);
+    }
+  }, [pickedKey]);
   useEffect(() => {
     if (!built) return;
     setError(null);
-    api.convertedRows(f, source, offset, PAGE).then(setPage, (e) => setError((e as Error).message));
-  }, [f, built, source, offset]);
+    api.convertedRows(f, picked ? null : source, picked ? 0 : offset, picked ? 500 : PAGE, picked ?? undefined).then(setPage, (e) => setError((e as Error).message));
+  }, [f, built, source, offset, pickedKey]);
   const pickSource = (id: string | null) => {
+    if (picked) onClearPicked();
     setSource(id);
     setOffset(0);
   };
@@ -542,17 +607,26 @@ function DataPanel({ f, built, sources }: { f: string; built: number | null; sou
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-1.5 border-b border-line px-3 py-1.5 text-sm">
-        <button onClick={() => pickSource(null)} className={`rounded px-2 py-0.5 ${source === null ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+        {picked && (
+          <span className="flex items-center gap-1.5 rounded px-2 py-0.5" style={{ background: "var(--color-raised)", boxShadow: `inset 0 0 0 1px ${PICK_COLOR}` }}>
+            <span className="text-ink">Picked on map · {picked.length}</span>
+            <button onClick={onClearPicked} className="text-ink-3 hover:text-ink" aria-label="Clear the selection" title="Clear the selection">
+              ✕
+            </button>
+          </span>
+        )}
+        <button onClick={() => pickSource(null)} className={`rounded px-2 py-0.5 ${!picked && source === null ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2"}`}>
           All
         </button>
         {sources.map((s) => (
-          <button key={s.id} onClick={() => pickSource(s.id)} className={`flex items-center gap-1.5 rounded px-2 py-0.5 ${source === s.id ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+          <button key={s.id} onClick={() => pickSource(s.id)} className={`flex items-center gap-1.5 rounded px-2 py-0.5 ${!picked && source === s.id ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2"}`}>
             <span className="size-2 rounded-full" style={{ background: s.color }} />
             {s.publisher}
           </button>
         ))}
         <span className="flex-1" />
-        {page && (
+        {page && picked && <span className="tabular text-ink-3">{page.total.toLocaleString()} rows</span>}
+        {page && !picked && (
           <>
             <span className="tabular text-ink-3">
               {page.total ? `${(offset + 1).toLocaleString()}–${Math.min(offset + PAGE, page.total).toLocaleString()} of ${page.total.toLocaleString()}` : "no rows"}

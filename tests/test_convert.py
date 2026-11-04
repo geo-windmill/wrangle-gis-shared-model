@@ -244,3 +244,41 @@ def test_a_click_finds_the_converted_row_under_it(tmp_path, monkeypatch):
     assert hit["row"]["road_class"] == "local" and hit["geometry"]["type"] == "LineString"
     far = c.get("/api/roads/converted/at?lon=-121.40&lat=38.40&ids=R1&tolerance_m=30").json()
     assert far["hits"] == []
+
+
+def test_the_data_can_show_just_the_features_picked_on_the_map(tmp_path, monkeypatch):
+    _unified(tmp_path, monkeypatch)
+    page = convert.read_rows("roads", None, 0, 100, keys=[("R1", 2), ("R1", 5), ("R2", 2)])
+    oid = page["columns"].index("source_oid")
+    assert page["total"] == 2 and [r[oid] for r in page["rows"]] == [2, 5]
+    assert convert.read_rows("roads", None, 0, 100, keys=[])["total"] == 0
+
+
+def test_picked_rows_name_their_publisher(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from wrangle import api
+
+    _unified(tmp_path, monkeypatch)
+    c = TestClient(api.app)
+    page = c.get("/api/roads/converted/rows?keys=R1:2,R1:5").json()
+    assert [r[0] for r in page["rows"]] == ["Sacramento County (R1)"] * 2
+    assert c.get("/api/roads/converted/rows?keys=R1:two").status_code == 422
+
+
+def test_a_box_picks_every_converted_feature_it_touches(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from wrangle import api
+
+    monkeypatch.setattr(convert, "OUT_DIR", tmp_path / "out")
+    gdf, sc = _layer(-121.5, 38.5, 0.001)  # vertical lines ~100 m apart
+    gdf = gdf.set_crs(4326, allow_override=True)
+    out, rep = convert.convert_source(ROADS, gdf, sc, _doc(), "R1", "Test County")
+    convert.write_source("roads", out, rep)
+    c = TestClient(api.app)
+    got = c.get("/api/roads/converted/in?bbox=-121.4995,38.5002,-121.4975,38.5008&ids=R1").json()
+    assert got["keys"] == ["R1:2", "R1:3"] and len(got["geometries"]) == 2
+    far = c.get("/api/roads/converted/in?bbox=-121.4,38.4,-121.39,38.41&ids=R1").json()
+    assert far["keys"] == []
+    assert c.get("/api/roads/converted/in?bbox=nope&ids=R1").status_code == 422

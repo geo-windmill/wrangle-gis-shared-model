@@ -488,9 +488,16 @@ def run_query(feature: str, publishers: dict[str, str], sql: str | None = None) 
     }
 
 
-def read_rows(feature: str, source_id: str | None, offset: int, limit: int) -> dict[str, Any]:
+def read_rows(
+    feature: str,
+    source_id: str | None,
+    offset: int,
+    limit: int,
+    keys: list[tuple[str, int]] | None = None,
+) -> dict[str, Any]:
     """A page of the converted rows as they landed in the model: where each came from
-    first, then every column but the geometry, in source order."""
+    first, then every column but the geometry, in source order. `keys` keeps only those
+    (source id, source OID) pairs: the features picked on the map."""
     import duckdb
 
     path = unified_path(feature)
@@ -498,7 +505,14 @@ def read_rows(feature: str, source_id: str | None, offset: int, limit: int) -> d
         raise FileNotFoundError(f"no unified {feature} layer yet")
     con = duckdb.connect()
     src = f"read_parquet('{path.resolve().as_posix()}')"
-    where, params = ("WHERE source_id = $sid", {"sid": source_id}) if source_id else ("", {})
+    conds, params = [], {}
+    if source_id:
+        conds.append("source_id = $sid")
+        params["sid"] = source_id
+    if keys is not None:
+        conds.append("list_contains($keys, source_id || ':' || CAST(source_oid AS VARCHAR))")
+        params["keys"] = [f"{s}:{o}" for s, o in keys] or [""]  # an empty list has no type
+    where = f"WHERE {' AND '.join(conds)}" if conds else ""
     total = con.execute(f"SELECT count(*) FROM {src} {where}", params).fetchone()[0]
     rel = con.execute(
         "SELECT source_id, source_oid, * EXCLUDE (geometry, source_id, source_oid) "

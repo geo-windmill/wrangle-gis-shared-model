@@ -36,8 +36,11 @@ type Options = {
   showBoundary?: boolean;
   basemap: boolean;
   // A click on the map: where it landed, and how many metres a few pixels cover
-  // at this zoom — the tolerance for "the feature under the pointer".
-  onClickPoint: (lng: number, lat: number, toleranceM: number) => void;
+  // at this zoom — the tolerance for "the feature under the pointer". `add` is true
+  // when Ctrl (or ⌘) was held: add to what is picked, don't replace it.
+  onClickPoint: (lng: number, lat: number, toleranceM: number, add: boolean) => void;
+  // Shift-drag a box: its lon/lat bounds. Given, it replaces MapLibre's shift-drag zoom.
+  onBoxSelect?: (box: BBox) => void;
   // Where a layer's GeoJSON comes from (default: the source as published). When the
   // URL changes — a re-conversion — the layer reloads in place.
   dataUrl?: (id: string) => string;
@@ -45,7 +48,7 @@ type Options = {
   classes?: MapClass[];
 };
 
-export function useSourceMap({ feature, sources, order, hidden, showBoundary = true, basemap, onClickPoint, dataUrl, classes }: Options) {
+export function useSourceMap({ feature, sources, order, hidden, showBoundary = true, basemap, onClickPoint, onBoxSelect, dataUrl, classes }: Options) {
   const urls = useRef<Record<string, string>>({});
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
@@ -248,7 +251,8 @@ export function useSourceMap({ feature, sources, order, hidden, showBoundary = t
       const mpp = (40075016.686 * Math.cos((e.lngLat.lat * Math.PI) / 180)) / (512 * 2 ** m.getZoom());
       // A few pixels of slack, but never so much that "the road you clicked"
       // becomes "some road nearby" when zoomed out.
-      onClickPoint(e.lngLat.lng, e.lngLat.lat, Math.min(400, Math.max(5, 6 * mpp)));
+      const add = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
+      onClickPoint(e.lngLat.lng, e.lngLat.lat, Math.min(400, Math.max(5, 6 * mpp)), add);
     };
     const onMove = (e: maplibregl.MapMouseEvent) => {
       m.getCanvas().style.cursor = m.queryRenderedFeatures(box(e.point), { layers: layers() }).length ? "pointer" : "";
@@ -260,6 +264,69 @@ export function useSourceMap({ feature, sources, order, hidden, showBoundary = t
       m.off("mousemove", onMove);
     };
   }, [order, hidden, ready, onClickPoint]);
+
+  // --- shift-drag to select a box ----------------------------------------------
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || !onBoxSelect) return;
+    m.boxZoom.disable(); // shift-drag selects here instead of zooming
+    const canvas = m.getCanvasContainer();
+    let start: maplibregl.Point | null = null;
+    let rect: HTMLDivElement | null = null;
+    const at = (e: MouseEvent) => {
+      const r = canvas.getBoundingClientRect();
+      return new maplibregl.Point(e.clientX - r.left, e.clientY - r.top);
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!start || !rect) return;
+      const p = at(e);
+      Object.assign(rect.style, {
+        left: `${Math.min(start.x, p.x)}px`,
+        top: `${Math.min(start.y, p.y)}px`,
+        width: `${Math.abs(p.x - start.x)}px`,
+        height: `${Math.abs(p.y - start.y)}px`,
+      });
+    };
+    const onUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      rect?.remove();
+      m.dragPan.enable();
+      const p = at(e);
+      if (start && Math.abs(p.x - start.x) > 3 && Math.abs(p.y - start.y) > 3) {
+        const a = m.unproject(start);
+        const b = m.unproject(p);
+        onBoxSelect([Math.min(a.lng, b.lng), Math.min(a.lat, b.lat), Math.max(a.lng, b.lng), Math.max(a.lat, b.lat)]);
+      }
+      start = null;
+      rect = null;
+    };
+    const onDown = (e: MouseEvent) => {
+      if (!e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      m.dragPan.disable();
+      start = at(e);
+      rect = document.createElement("div");
+      Object.assign(rect.style, {
+        position: "absolute",
+        left: `${start.x}px`,
+        top: `${start.y}px`,
+        border: `2px solid ${PICK_COLOR}`,
+        background: "rgba(255,255,255,0.08)",
+        pointerEvents: "none",
+        zIndex: "2",
+      });
+      canvas.appendChild(rect);
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
+    canvas.addEventListener("mousedown", onDown, true);
+    return () => {
+      canvas.removeEventListener("mousedown", onDown, true);
+      m.boxZoom.enable();
+    };
+  }, [ready, onBoxSelect]);
 
   // --- imperative helpers -----------------------------------------------------
   /** Outline one feature per source; sources left out are cleared. */
@@ -292,16 +359,17 @@ export function useSourceMap({ feature, sources, order, hidden, showBoundary = t
     m.moveLayer("pick-line");
   }, []);
 
-  /** A popup at a point (null closes it). Closing it clears the outline too. */
+  /** A popup at a point (null closes it). Closing it clears the outline too, unless
+   *  `keepOutline`: the outline then belongs to a selection that outlives the popup. */
   const popup = useCallback(
-    (lng: number, lat: number, content: HTMLElement | null) => {
+    (lng: number, lat: number, content: HTMLElement | null, keepOutline = false) => {
       const m = map.current;
       popupRef.current?.remove();
       popupRef.current = null;
       if (!m || !content) return;
       const p = new maplibregl.Popup({ maxWidth: "380px", closeOnClick: false }).setLngLat([lng, lat]).setDOMContent(content).addTo(m);
       p.on("close", () => {
-        if (popupRef.current === p) outline([]);
+        if (popupRef.current === p && !keepOutline) outline([]);
       });
       popupRef.current = p;
     },
